@@ -1,0 +1,25 @@
+global:
+  postgresql:
+    password: postgres
+    username: postgres
+    database: postgres
+    replication:
+      password: postgres
+  image:
+    registry: docker.io
+    repository: bitnami/postgresql-repmgr
+    tag: latest
+postgresql:
+  replicaCount: 5
+  replicationMode: synchronous
+  syncReplication: true
+  persistence:
+    enabled: true
+    storageClass: "nfs"
+    size: 2Gi
+pgpool:
+  replicaCount: 2
+  livenessProbe:
+    enabled: true
+  readinessProbe:
+    enabled: true

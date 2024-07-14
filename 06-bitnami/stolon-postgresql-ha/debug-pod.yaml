@@ -1,0 +1,12 @@
+# debug-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug
+  namespace: postgresql
+spec:
+  containers:
+  - name: psql
+    image: postgres:latest
+    command: ["sleep"]
+    args: ["3600"]

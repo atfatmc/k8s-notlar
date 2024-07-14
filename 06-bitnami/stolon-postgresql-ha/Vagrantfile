@@ -1,0 +1,82 @@
+VAGRANTFILE_API_VERSION = "2"
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  # Define master node
+  config.vm.define "k3s-master" do |master|
+
+    # Disable IPv6
+    disable_ipv6 = <<-SHELL
+      echo 'net.ipv6.conf.all.disable_ipv6 = 1' | sudo tee -a /etc/sysctl.conf
+      echo 'net.ipv6.conf.default.disable_ipv6 = 1' | sudo tee -a /etc/sysctl.conf
+      echo 'net.ipv6.conf.lo.disable_ipv6 = 1' | sudo tee -a /etc/sysctl.conf
+      sudo sysctl -p
+    SHELL
+
+    master.vm.box = "ubuntu/jammy64"
+    master.vm.hostname = "k3s-master"
+
+    # Port forwarding rules
+    master.vm.network "forwarded_port", guest: 6443, host: 6443, auto_correct: true
+    master.vm.network "forwarded_port", guest: 5432, host: 5432
+    master.vm.network "public_network", bridge: "eno1", ip: "192.168.1.120"
+
+    master.vm.provider "virtualbox" do |vb|
+      vb.memory = 2048
+      vb.cpus = 2
+    end
+
+    master.vm.provision "shell", inline: disable_ipv6
+    master.vm.provision "shell", inline: <<-SHELL
+      sudo ufw disable
+      sudo apt-get update
+      sudo apt-get install -y curl
+      MASTER_IP=$(ip addr show enp0s8 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+      curl -sfL https://get.k3s.io | sh -s - server --node-ip=$MASTER_IP --flannel-iface enp0s8
+      sudo cp /var/lib/rancher/k3s/server/node-token /vagrant/node-token
+      sudo cp /etc/rancher/k3s/k3s.yaml /vagrant/k3s.yaml
+    SHELL
+  end
+
+  # Define worker nodes
+  (1..1).each do |i|
+    config.vm.define "k3s-node-#{i}" do |node|
+      # Disable IPv6
+      disable_ipv6 = <<-SHELL
+        echo 'net.ipv6.conf.all.disable_ipv6 = 1' | sudo tee -a /etc/sysctl.conf
+        echo 'net.ipv6.conf.default.disable_ipv6 = 1' | sudo tee -a /etc/sysctl.conf
+        echo 'net.ipv6.conf.lo.disable_ipv6 = 1' | sudo tee -a /etc/sysctl.conf
+        sudo sysctl -p
+      SHELL
+
+      # Port forwarding rules
+      node.vm.network "forwarded_port", guest: 6443, host: 6443, auto_correct: true
+
+      node.vm.box = "ubuntu/jammy64"
+      node.vm.hostname = "k3s-node-#{i}"
+      node.vm.network "public_network", bridge: "eno1", ip: "192.168.1.12#{i}"
+
+      node.vm.provider "virtualbox" do |vb|
+        vb.memory = 1024
+        vb.cpus = 2
+      end
+
+      node.vm.provision "shell", inline: disable_ipv6
+      node.vm.provision "shell", inline: <<-SHELL
+        sudo ufw disable
+        sudo apt-get update
+        sudo apt-get install -y curl
+        K3S_TOKEN=$(cat /vagrant/node-token)
+        WORKER_IP=$(ip addr show enp0s8 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+        curl -sfL https://get.k3s.io | K3S_URL=https://192.168.1.120:6443 K3S_TOKEN=$K3S_TOKEN sh -s - --node-ip $WORKER_IP --flannel-iface enp0s8
+      SHELL
+    end
+  end
+
+  # Enable SSH access
+  config.vm.provision "shell", inline: <<-SHELL
+    sudo apt-get install -y openssh-server
+    sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    echo 'vagrant:vagrant' | sudo chpasswd
+    sudo service ssh restart
+  SHELL
+end

@@ -1,0 +1,136 @@
+# stolon-deployment.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stolon
+  namespace: postgresql
+data:
+  stolon-keeper: |
+    initMode: new
+    pgReplUsername: repluser
+    pgReplPassword: replpassword
+    clusterName: stolon-cluster
+    keeperUID: keeper
+  stolon-sentinel: |
+    clusterName: stolon-cluster
+  stolon-proxy: |
+    clusterName: stolon-cluster
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: stolon-keeper
+  namespace: postgresql
+spec:
+  serviceName: "stolon"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: stolon-keeper
+  template:
+    metadata:
+      labels:
+        app: stolon-keeper
+    spec:
+      containers:
+      - name: stolon-keeper
+        image: sorintlab/stolon:master-pg12
+        env:
+        - name: STKEEPER_CLUSTER_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: stolon
+              key: stolon-keeper
+        - name: STKEEPER_STORE_BACKEND
+          value: etcd
+        - name: STKEEPER_STORE_ENDPOINTS
+          value: http://etcd.etcd.svc.cluster.local:2379
+        - name: POSTGRES_PASSWORD
+          value: supersecretpassword
+        ports:
+        - containerPort: 5432
+        - containerPort: 8008
+        volumeMounts:
+        - name: data
+          mountPath: /stolon-data
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stolon-sentinel
+  namespace: postgresql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stolon-sentinel
+  template:
+    metadata:
+      labels:
+        app: stolon-sentinel
+    spec:
+      containers:
+      - name: stolon-sentinel
+        image: sorintlab/stolon:master-pg12
+        env:
+        - name: POSTGRES_PASSWORD
+          value: supersecretpassword
+        - name: STSENTINEL_CLUSTER_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: stolon
+              key: stolon-sentinel
+        - name: STSENTINEL_STORE_BACKEND
+          value: etcd
+        - name: STSENTINEL_STORE_ENDPOINTS
+          value: http://etcd.etcd.svc.cluster.local:2379
+        ports:
+        - containerPort: 8008
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stolon-proxy
+  namespace: postgresql
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: stolon-proxy
+  template:
+    metadata:
+      labels:
+        app: stolon-proxy
+    spec:
+      containers:
+      - name: stolon-proxy
+        image: sorintlab/stolon:master-pg12
+        env:
+        - name: POSTGRES_PASSWORD
+          value: supersecretpassword
+        - name: STPROXY_CLUSTER_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: stolon
+              key: stolon-proxy
+        - name: STPROXY_STORE_BACKEND
+          value: etcd
+        - name: STPROXY_STORE_ENDPOINTS
+          value: http://etcd.etcd.svc.cluster.local:2379
+        ports:
+        - containerPort: 5432
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stolon-proxy
+  namespace: postgresql
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: stolon-proxy

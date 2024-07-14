@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: csv-to-db
+spec:
+  schedule: "0 0 * * *" # Her gece yarısı çalışır
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: csv-to-db
+              image: postgres:13
+              env:
+                - name: PGPASSWORD
+                  value: "testpassword"
+              command: ["sh", "-c", "psql -h <db-host> -U testuser -d testdb -c \"\\copy mytable FROM '/data/mydata.csv' DELIMITER ',' CSV HEADER;\""]
+              volumeMounts:
+                - name: csv-storage
+                  mountPath: /data
+          restartPolicy: OnFailure
+          volumes:
+            - name: csv-storage
+              persistentVolumeClaim:
+                claimName: pvc-csv
